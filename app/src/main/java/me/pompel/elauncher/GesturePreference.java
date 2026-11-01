@@ -15,6 +15,9 @@ import androidx.preference.Preference;
 import androidx.preference.PreferenceViewHolder;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import android.view.View;
 import java.util.List;
 
 public class GesturePreference extends Preference {
@@ -35,8 +38,12 @@ public class GesturePreference extends Preference {
 
         updateButtonLabels(leftButton, rightButton);
 
-        leftButton.setOnClickListener(v -> showAppPicker(true));
-        rightButton.setOnClickListener(v -> showAppPicker(false));
+        leftButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showAppPicker(true); }
+        });
+        rightButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showAppPicker(false); }
+        });
     }
 
     private void updateButtonLabels(Button leftButton, Button rightButton) {
@@ -113,7 +120,11 @@ public class GesturePreference extends Preference {
             apps.add(new AppInfo(name, pkg));
         }
 
-        apps.sort((a, b) -> a.name.compareToIgnoreCase(b.name));
+        Collections.sort(apps, new Comparator<AppInfo>() {
+            @Override public int compare(AppInfo a, AppInfo b) {
+                return a.name.compareToIgnoreCase(b.name);
+            }
+        });
         return apps;
     }
 

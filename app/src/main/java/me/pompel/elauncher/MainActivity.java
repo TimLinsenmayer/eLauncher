@@ -7,26 +7,20 @@ import androidx.preference.PreferenceManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import android.annotation.SuppressLint;
-import android.app.AppOpsManager;
 import android.app.AlertDialog;
-import android.app.usage.UsageStats;
-import android.app.usage.UsageStatsManager;
-import android.content.ContentResolver;
 import android.content.Context;
+import android.content.ActivityNotFoundException;
+import android.content.DialogInterface;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.res.Configuration;
 import android.content.res.TypedArray;
-import android.database.Cursor;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.window.OnBackInvokedCallback;
-import android.window.OnBackInvokedDispatcher;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.text.Editable;
@@ -34,15 +28,11 @@ import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextWatcher;
 import android.text.style.StyleSpan;
-import android.transition.Fade;
-import android.transition.Transition;
-import android.transition.TransitionManager;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.Window;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -50,13 +40,13 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
-import java.util.SortedMap;
-import java.util.TreeMap;
 
 public class MainActivity extends AppCompatActivity {
     private static final String NUMBER_OF_APPS = "number_of_apps_preference";
@@ -77,6 +67,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadApps() {
         appList.clear();
+        appNames.clear();
 
         Set<String> activeProcessPackages = listActiveProcessPackages();
 
@@ -84,7 +75,11 @@ public class MainActivity extends AppCompatActivity {
         Intent intent = new Intent(Intent.ACTION_MAIN, null);
         intent.addCategory(Intent.CATEGORY_LAUNCHER);
         for (ResolveInfo info : packageManager.queryIntentActivities(intent, 0)) appList.add(new App(info.loadLabel(packageManager).toString(), info.activityInfo.packageName));
-        appList.sort((app1, app2) -> app1.appName.toString().compareToIgnoreCase(app2.appName.toString()));
+        Collections.sort(appList, new Comparator<App>() {
+            @Override public int compare(App a, App b) {
+                return a.appName.toString().compareToIgnoreCase(b.appName.toString());
+            }
+        });
         for (App app : appList) {
             appNames.add(app.appName);
 
@@ -115,12 +110,7 @@ public class MainActivity extends AppCompatActivity {
     private void changeLayout(boolean home, boolean animated) {
         if (!home) loadApps();
         keyboardAction(home);
-        if (animated) {
-            Transition transition = new Fade();
-            transition.setDuration(300);
-            transition.addTarget(R.id.HomeScreen);
-            TransitionManager.beginDelayedTransition(findViewById(R.id.MainLayout), transition);
-        }
+        // E-ink displays benefit from immediate updates without fading.
         findViewById(R.id.HomeScreen).setVisibility(home ? View.VISIBLE : View.GONE);
         findViewById(R.id.AppDrawer).setVisibility(home ? View.GONE : View.VISIBLE);
 
@@ -129,9 +119,7 @@ public class MainActivity extends AppCompatActivity {
         if (home) {
             LinearLayout homescreen = findViewById(R.id.HomeScreen);
 
-            int length = hasUsageStatsPermission() ?
-                    homescreen.getChildCount() :
-                    homescreen.getChildCount()-1;
+            int length = homescreen.getChildCount();
 
             for (int i = 0; i < length; i++) {
                 View view = homescreen.getChildAt(i);
@@ -166,14 +154,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void safeStartActivity(Intent intent) {
-        if (intent != null) startActivity(intent);
+        if (intent == null) return;
+        try {
+            startActivity(intent);
+        } catch (ActivityNotFoundException | SecurityException e) {
+            Toast.makeText(this, "App unavailable", Toast.LENGTH_SHORT).show();
+        }
     }
 
     // check if you have USAGE_STATS permission
     private boolean hasUsageStatsPermission() {
-        AppOpsManager appOps = (AppOpsManager) getSystemService(Context.APP_OPS_SERVICE);
-        int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), getPackageName());
-        return mode == AppOpsManager.MODE_ALLOWED;
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
+                && Api21.hasUsageStatsPermission(this);
     }
 
     @Override
@@ -259,21 +251,20 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         // if it does not have USAGE_STATS and it's the first launch, open settings
-        if (!hasUsageStatsPermission() && !prefs.getBoolean("firstLaunch", false)) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
+                && !hasUsageStatsPermission() && !prefs.getBoolean("firstLaunch", false)) {
             Intent usageAccessIntent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
             usageAccessIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(usageAccessIntent);
+            safeStartActivity(usageAccessIntent);
             SharedPreferences.Editor editor = prefs.edit();
             editor.putBoolean("firstLaunch", true);
             editor.apply();
         }
 
         BigmeShims.queryLauncherProvider(this);
-        Window window = getWindow();
-        //window.addFlags(FLAG_LAYOUT_NO_LIMITS);
-        //window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-        window.setStatusBarColor(getColorFromAttr(androidx.appcompat.R.attr.background));
-        window.setNavigationBarColor(getColorFromAttr(androidx.appcompat.R.attr.background));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            Api21.setSystemBarColors(getWindow(), getColorFromAttr(android.R.attr.colorBackground));
+        }
 
         appList = new ArrayList<>();
         appNames = new ArrayList<>();
@@ -296,6 +287,7 @@ public class MainActivity extends AppCompatActivity {
         RecyclerView.LayoutManager layoutManager = new LinearLayoutManager(getApplicationContext());
         recyclerView.setLayoutManager(layoutManager);
         recyclerView.setAdapter(adapter);
+        recyclerView.setItemAnimator(null);
 
         recyclerView.addOnScrollListener(new RecyclerView.OnScrollListener() {
             private boolean onTop = false;
@@ -344,7 +336,6 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout homescreen = findViewById(R.id.HomeScreen);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
 
-        CharSequence[] alertApps = appNames.toArray(new CharSequence[0]);
         int i = 0;
         for (i = 0; i < prefs.getInt(NUMBER_OF_APPS, 8); i++) {
             TextView textView = new TextView(this);
@@ -355,33 +346,43 @@ public class MainActivity extends AppCompatActivity {
             textView.setText(prefs.getString(Integer.toString(i), "App"));
             textView.setTag(i);
             textView.setLayoutParams(params);
-            textView.setOnLongClickListener(v -> {
-                loadApps();
-                AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
-                builder.setTitle("Select app");
-                builder.setItems(alertApps, (dialog, which) -> {
-                    AlertDialog.Builder builder1 = new AlertDialog.Builder(MainActivity.this);
-                    builder1.setTitle("Set app name");
-                    final EditText input = new EditText(MainActivity.this);
-                    input.setText(appNames.get(which));
-                    builder1.setView(input);
-                    input.setTag(appList.get(which).packageId);
-                    builder1.setPositiveButton("Add", (dialog1, which1) -> {
-                        String name = input.getText().toString();
-                        textView.setText(name);
-                        SharedPreferences.Editor editor = prefs.edit();
-                        editor.putString(String.valueOf(textView.getTag()), name);
-                        editor.putString("p" + textView.getTag(), String.valueOf(input.getTag()));
-                        editor.apply();
+            textView.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override public boolean onLongClick(View v) {
+                    loadApps();
+                    AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+                    builder.setTitle("Select app");
+                    final CharSequence[] alertApps = appNames.toArray(new CharSequence[0]);
+                    builder.setItems(alertApps, new DialogInterface.OnClickListener() {
+                        @Override public void onClick(DialogInterface dialog, int which) {
+                            AlertDialog.Builder builder1 = new AlertDialog.Builder(MainActivity.this);
+                            builder1.setTitle("Set app name");
+                            final EditText input = new EditText(MainActivity.this);
+                            input.setText(appNames.get(which));
+                            builder1.setView(input);
+                            input.setTag(appList.get(which).packageId);
+                            builder1.setPositiveButton("Add", new DialogInterface.OnClickListener() {
+                                @Override public void onClick(DialogInterface dialog1, int which1) {
+                                    String name = input.getText().toString();
+                                    textView.setText(name);
+                                    SharedPreferences.Editor editor = prefs.edit();
+                                    editor.putString(String.valueOf(textView.getTag()), name);
+                                    editor.putString("p" + textView.getTag(), String.valueOf(input.getTag()));
+                                    editor.apply();
+                                }
+                            });
+                            builder1.show();
+                        }
                     });
-                    builder1.create();
-                    builder1.show();
-                });
-                builder.create();
-                builder.show();
-                return true;
+                    builder.show();
+                    return true;
+                }
             });
-            textView.setOnClickListener(v -> openAppWithIntent(getPackageManager().getLaunchIntentForPackage(prefs.getString("p" + textView.getTag(), "")), true));
+            textView.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    openAppWithIntent(getPackageManager().getLaunchIntentForPackage(
+                            prefs.getString("p" + textView.getTag(), "")), true);
+                }
+            });
             homescreen.addView(textView);
         }
 
@@ -395,9 +396,11 @@ public class MainActivity extends AppCompatActivity {
             textView.setText(lastAppName != null ? lastAppName : "Last App");
             textView.setTag(i);
             textView.setLayoutParams(params);
-            textView.setOnClickListener(v -> {
-                String pkg = lastActiveProcessPackage();
-                openAppWithIntent(getPackageManager().getLaunchIntentForPackage(pkg), true);
+            textView.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    String pkg = lastActiveProcessPackage();
+                    openAppWithIntent(getPackageManager().getLaunchIntentForPackage(pkg), true);
+                }
             });
             homescreen.addView(textView);
         }
@@ -410,9 +413,7 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout homescreen = findViewById(R.id.HomeScreen);
         Set<String> activeProcessPackages = listActiveProcessPackages();
 
-        int length = hasUsageStatsPermission() ?
-                homescreen.getChildCount() :
-                homescreen.getChildCount()-1;
+        int length = homescreen.getChildCount();
 
         for (int i = 0; i < length; i++) {
             View view = homescreen.getChildAt(i);
@@ -509,6 +510,7 @@ public class MainActivity extends AppCompatActivity {
 
     public Intent getLastLauncherIntent() {
         ResolveInfo[] launcherResolveInfos = getLaunchersResolveInfos().toArray(new ResolveInfo[0]);
+        if (launcherResolveInfos.length == 0) return null;
         ResolveInfo lastLauncher = launcherResolveInfos[launcherResolveInfos.length-1];
 
         if (lastLauncher != null) {
@@ -594,35 +596,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private Set<String> listActiveProcessPackages() {
-        Set<String> activePackages = new HashSet<>();
-        UsageStatsManager mUsageStatsManager = (UsageStatsManager)getSystemService(Context.USAGE_STATS_SERVICE);
-        long endTime = System.currentTimeMillis();
-        long beginTime = endTime - 1000*60*60; // last 60 minutes
-
-        // We get usage stats for the last day
-        List<UsageStats> stats = mUsageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, beginTime, endTime);
-
-        // Sort the stats by the last time used
-        if(stats != null)
-        {
-            SortedMap<Long,UsageStats> mySortedMap = new TreeMap<Long,UsageStats>();
-            for (UsageStats usageStats : stats)
-            {
-                if (usageStats.getLastTimeUsed() < beginTime) continue;
-                mySortedMap.put(usageStats.getLastTimeUsed(), usageStats);
-            }
-            if(!mySortedMap.isEmpty())
-            {
-                // topActivity =  mySortedMap.get(mySortedMap.lastKey()).getPackageName();
-                // iterate over mySortedMap
-                for (UsageStats usageStats : mySortedMap.values())
-                {
-                    activePackages.add(usageStats.getPackageName());
-                }
-            }
-        }
-
-        return activePackages;
+        if (!hasUsageStatsPermission()) return Collections.emptySet();
+        return Api21.activePackages(this);
     }
 
     private List<String> getHomescreenPackages() {
@@ -649,10 +624,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String lastActiveProcessPackage() {
+        if (!hasUsageStatsPermission()) return "";
         Set<String> excludePackages = new HashSet<>();
 
         excludePackages.add(getDefaultBrowserPackage());
-        getLaunchersResolveInfos().forEach(resolveInfo -> excludePackages.add(resolveInfo.activityInfo.packageName));
+        for (ResolveInfo info : getLaunchersResolveInfos()) {
+            excludePackages.add(info.activityInfo.packageName);
+        }
         excludePackages.add(getDefaultPhoneAppPackage());
         excludePackages.add(ELAUNCHER_PACKAGE);
         excludePackages.addAll(getHomescreenPackages());
@@ -673,39 +651,17 @@ public class MainActivity extends AppCompatActivity {
                         "com.xrz.res.service",
                         "com.xrz.settings"));
 
-        UsageStatsManager mUsageStatsManager = (UsageStatsManager)getSystemService(Context.USAGE_STATS_SERVICE);
-        long endTime = System.currentTimeMillis();
-        long beginTime = endTime - 1000*60*120; // last 2 hours
-
-        // We get usage stats for the last day
-        List<UsageStats> stats = mUsageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, beginTime, endTime);
-
-        // Sort the stats by the last time used
-        if(stats != null)
-        {
-            SortedMap<Long,UsageStats> mySortedMap = new TreeMap<Long,UsageStats>();
-            for (UsageStats usageStats : stats)
-            {
-                if (usageStats.getLastTimeUsed() < beginTime) continue;
-                if (excludePackages.contains(usageStats.getPackageName())) continue;
-                if (getPackageManager().getLaunchIntentForPackage(usageStats.getPackageName()) == null) continue;
-                mySortedMap.put(usageStats.getLastTimeUsed(),usageStats);
-            }
-            if(!mySortedMap.isEmpty())
-            {
-                UsageStats last = mySortedMap.get(mySortedMap.lastKey());
-                return last != null ? last.getPackageName() : "";
-            }
-        }
-
-        return "";
+        return Api21.lastPackage(this, excludePackages);
     }
 
     private int getColorFromAttr(int attr) {
         TypedValue typedValue = new TypedValue();
         int color;
-        try (TypedArray a = obtainStyledAttributes(typedValue.data, new int[]{attr})) {
+        TypedArray a = obtainStyledAttributes(typedValue.data, new int[]{attr});
+        try {
             color = a.getColor(0, 0);
+        } finally {
+            a.recycle();
         }
         return color;
     }

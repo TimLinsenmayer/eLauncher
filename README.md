@@ -43,3 +43,20 @@ Behavior specs live in Gherkin features (`app/src/test/resources/features/`) and
 - Step definitions are in `app/src/test/java/me/pompel/elauncher/bdd/steps/`.
 - `check` fails the build when line coverage of the app source drops below **80%** (`jacocoTestCoverageVerification`).
 - CI (`.github/workflows/ci.yml`) enforces the gate on every push and pull request.
+
+## Android 4.4 / API 19 e-readers
+
+This fork is adjusted for Android 4.4.2 (API 19) e-readers such as the Tolino
+Epos 2. The minimum SDK remains 19. HOME registration, alphabetically sorted
+applications, launching, home slots and basic fuzzy search remain available.
+On API 19 there is no usage-access request, usage highlighting or last-used-app
+slot, and no system-bar color API calls. Drawer transitions and list animations
+are disabled for e-ink. The search drawable uses explicit black/white color
+resources, compatible with KitKat. Usage statistics and system-bar colors on
+API 21+ are isolated behind SDK guards; Bigme integration remains vendor/API gated.
+
+Build with `./gradlew assembleDebug`; the APK is
+`app/build/outputs/apk/debug/app-debug.apk`. Install with
+`adb install -r app/build/outputs/apk/debug/app-debug.apk`, then select eLauncher
+as the default HOME app. Physical Tolino testing is still required, including
+returning HOME after reboot; a successful build alone does not prove device behavior.

@@ -59,6 +59,7 @@ def offlineExecFile = layout.buildDirectory.file('jacoco/testDebugUnitTest.exec'
 
 tasks.register('instrumentDebugClasses', DefaultTask) {
     dependsOn tasks.named('compileDebugJavaWithJavac')
+    inputs.dir(layout.buildDirectory.dir('intermediates/javac/debug/compileDebugJavaWithJavac/classes'))
     outputs.dir(offlineInstrDir)
     doLast {
         def outDir = offlineInstrDir.get().asFile
@@ -78,6 +79,7 @@ tasks.register('instrumentDebugClasses', DefaultTask) {
 tasks.matching { it.name == 'testDebugUnitTest' }.configureEach {
     dependsOn tasks.named('instrumentDebugClasses')
     doFirst {
+        delete(offlineExecFile)
         systemProperty 'jacoco-agent.destfile', offlineExecFile.get().asFile.absolutePath
         classpath = files(offlineInstrDir) + classpath + configurations.jacocoAgentRuntime
     }
@@ -140,7 +142,8 @@ dependencies {
 
     // JVM unit-test stack: Robolectric + Cucumber-JVM (BDD)
     testImplementation 'junit:junit:4.13.2'
-    testImplementation 'org.robolectric:robolectric:4.14.1'
+    // Last Robolectric release supporting KitKat; newer versions start at API 21.
+    testImplementation 'org.robolectric:robolectric:4.11.1'
     testImplementation 'androidx.test:core:1.6.1'
     testImplementation 'androidx.test.ext:junit:1.2.1'
     testImplementation 'androidx.test.espresso:espresso-core:3.6.1'
@@ -150,11 +153,12 @@ dependencies {
     testImplementation 'io.cucumber:cucumber-picocontainer:7.18.1'
 
 
+    // Keep the transitive Kotlin runtime compatible with AGP 8.5 / D8 and API 19.
     constraints {
-        implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.4.20") {
+        implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.24") {
             because("kotlin-stdlib-jdk7 is now a part of kotlin-stdlib")
         }
-        implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.4.20") {
+        implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.24") {
             because("kotlin-stdlib-jdk8 is now a part of kotlin-stdlib")
         }
     }
